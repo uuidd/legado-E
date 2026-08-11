@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.drawable.Drawable
 import androidx.core.graphics.drawable.toBitmap
 import com.bumptech.glide.Glide
+import com.bumptech.glide.request.RequestOptions
 import io.legado.app.api.ReturnData
 import io.legado.app.data.appDb
 import io.legado.app.data.entities.Book
@@ -16,6 +17,7 @@ import io.legado.app.help.book.ContentProcessor
 import io.legado.app.help.book.isLocal
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.glide.ImageLoader
+import io.legado.app.help.glide.OkHttpModelLoader
 import io.legado.app.model.BookCover
 import io.legado.app.model.ImageProvider
 import io.legado.app.model.ReadBook
@@ -69,13 +71,25 @@ object BookController {
     fun getCover(parameters: Map<String, List<String>>): ReturnData {
         val returnData = ReturnData()
         val coverPath = parameters["path"]?.firstOrNull()
-        val ftBitmap = ImageLoader.loadBitmap(appCtx, coverPath)
-            .override(84, 112)
-            .centerCrop()
-            .submit()
+        val sourceOrigin = parameters["origin"]?.firstOrNull()
+        val original = parameters["original"]?.firstOrNull()?.toBooleanStrictOrNull() == true
+        var builder = ImageLoader.loadBitmap(appCtx, coverPath)
+        if (!sourceOrigin.isNullOrBlank()) {
+            builder = builder.apply(
+                RequestOptions().set(OkHttpModelLoader.sourceOriginOption, sourceOrigin)
+            )
+        }
+        val ftBitmap = if (original) {
+            builder.submit()
+        } else {
+            builder.override(84, 112).centerCrop().submit()
+        }
         return try {
-            returnData.setData(ftBitmap.get(3, TimeUnit.SECONDS))
+            returnData.setData(ftBitmap.get(if (original) 15 else 3, TimeUnit.SECONDS))
         } catch (e: Exception) {
+            if (original) {
+                return returnData.setErrorMsg(e.localizedMessage ?: "get original cover error")
+            }
             try {
                 val defaultBitmap = defaultCoverCache.getOrPut(BookCover.defaultDrawable) {
                     Glide.with(appCtx)

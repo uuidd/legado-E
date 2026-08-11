@@ -18,6 +18,9 @@ class WebSocketServer(port: Int) : NanoWSD(port) {
             "/searchBook" -> {
                 BookSearchWebSocket(handshake)
             }
+            "/searchCover" -> {
+                BookCoverSearchWebSocket(handshake)
+            }
             else -> null
         }
     }

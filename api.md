@@ -115,6 +115,15 @@ URL = ws://127.0.0.1:1235/searchBook
 Message = { key: [String] }
 ```
 
+#### 搜索换封面候选
+
+使用与 App“更换封面”相同的全局封面规则、缓存及启用书源规则。结果按书源逐条推送，完成后服务端关闭连接。
+
+```
+URL = ws://127.0.0.1:1235/searchCover
+Message = { name: [String], author: [String] }
+```
+
 #### 插入书籍
 
 请求BODY内容为`JSON`字符串，  
@@ -162,9 +171,11 @@ Method = GET
 #### 获取封面
 
 ```
-URL = http://127.0.0.1:1234/cover?path=xxxxx
+URL = http://127.0.0.1:1234/cover?path=xxxxx&origin=bookSourceUrl&original=true
 Method = GET
 ```
+
+`origin` 用于应用该书源的请求头与 Cookie；`original=true` 返回原始尺寸，不传时保持 Web 书架使用的 `84x112` 裁剪图。
 
 #### 获取正文图片
 
