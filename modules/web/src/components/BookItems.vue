@@ -7,6 +7,31 @@
         :key="book.bookUrl"
         @click="handleClick(book)"
       >
+        <div v-if="!isSearch" class="book-actions" @click.stop>
+          <el-dropdown
+            trigger="click"
+            @command="handleCommand($event, book as Book)"
+          >
+            <el-button
+              class="book-actions-button"
+              text
+              circle
+              :icon="MoreFilled"
+              aria-label="书籍工具"
+              title="书籍工具"
+            />
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="cover" :icon="Picture">
+                  下载封面
+                </el-dropdown-item>
+                <el-dropdown-item command="book" :icon="Download">
+                  下载小说
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
         <div class="cover-img">
           <img
             class="cover"
@@ -55,16 +80,32 @@
 import type { Book, SeachBook } from '@/book'
 import { dateFormat, isLegadoUrl } from '../utils/utils'
 import API from '@api'
+import { Download, MoreFilled, Picture } from '@element-plus/icons-vue'
 const props = defineProps<{
   books: Array<Book | SeachBook>
   isSearch: boolean
 }>()
 
-const emit = defineEmits(['bookClick'])
+const emit = defineEmits<{
+  bookClick: [book: Book | SeachBook]
+  downloadCover: [book: Book]
+  downloadBook: [book: Book]
+}>()
 const handleClick = (book: Book | SeachBook) => emit('bookClick', book)
-const getCover = ({ bookUrl, coverUrl }: Book | SeachBook) => {
+const handleCommand = (command: string, book: Book) => {
+  if (command === 'cover') emit('downloadCover', book)
+  if (command === 'book') emit('downloadBook', book)
+}
+const getCover = (book: Book | SeachBook) => {
+  const { bookUrl, origin } = book
+  const coverUrl =
+    'customCoverUrl' in book
+      ? book.customCoverUrl || book.coverUrl
+      : book.coverUrl
   if (coverUrl === undefined) return API.getProxyCoverUrl(bookUrl)
-  return isLegadoUrl(coverUrl) ? API.getProxyCoverUrl(coverUrl) : coverUrl
+  return isLegadoUrl(coverUrl)
+    ? API.getProxyCoverUrl(coverUrl, origin)
+    : coverUrl
 }
 const proxyImage = (evt: Event) => {
   const target = evt.target as HTMLImageElement
@@ -87,6 +128,7 @@ const subJustify = computed(() =>
     grid-gap: 10px;
 
     .book {
+      position: relative;
       user-select: none;
       display: flex;
       cursor: pointer;
@@ -95,6 +137,20 @@ const subJustify = computed(() =>
       width: 360px;
       flex-direction: row;
       justify-content: space-around;
+
+      .book-actions {
+        position: absolute;
+        z-index: 2;
+        top: 10px;
+        right: 10px;
+      }
+
+      .book-actions-button {
+        opacity: 0;
+        color: var(--el-text-color-regular);
+        background: var(--el-bg-color-overlay);
+        transition: opacity 150ms ease;
+      }
 
       .cover-img {
         width: 84px;
@@ -166,6 +222,14 @@ const subJustify = computed(() =>
     .book:hover {
       background: rgba(0, 0, 0, 0.1);
       transition-duration: 0.5s;
+
+      .book-actions-button {
+        opacity: 1;
+      }
+    }
+
+    .book:focus-within .book-actions-button {
+      opacity: 1;
     }
   }
 
@@ -189,6 +253,10 @@ const subJustify = computed(() =>
         width: 100%;
         margin-bottom: 0;
         padding: 10px 20px;
+
+        .book-actions-button {
+          opacity: 1;
+        }
       }
     }
   }

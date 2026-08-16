@@ -18,6 +18,13 @@ export type LeagdoApiResponse<T> = {
   data: T
 }
 
+export type CoverSearchCallbacks = {
+  onResult: (data: SeachBook[]) => void
+  onProgress?: (source: string) => void
+  onError?: (message: string) => void
+  onFinish: () => void
+}
+
 export let legado_http_entry_point = ''
 export let legado_webSocket_entry_point = ''
 
@@ -115,6 +122,55 @@ const search = (
   }
 }
 
+const searchCover = (
+  name: string,
+  author: string,
+  callbacks: CoverSearchCallbacks,
+) => {
+  const socket = new WebSocket(
+    new URL('searchCover', legado_webSocket_entry_point),
+  )
+  let finished = false
+
+  const finish = () => {
+    if (finished) return
+    finished = true
+    callbacks.onFinish()
+  }
+
+  socket.onerror = event => {
+    try {
+      wsOnError?.call(socket, event)
+    } catch {}
+    callbacks.onError?.('封面搜索连接失败')
+  }
+  socket.onopen = () => socket.send(JSON.stringify({ name, author }))
+  socket.onmessage = event => {
+    try {
+      const data = JSON.parse(event.data) as
+        SeachBook[] | { error?: string; source?: string; type?: string }
+      if (Array.isArray(data)) {
+        callbacks.onResult(data)
+      } else if (data.error) {
+        callbacks.onError?.(data.error)
+      } else if (data.type === 'progress' && data.source) {
+        callbacks.onProgress?.(data.source)
+      }
+      wsOnMessage?.call(socket, event)
+    } catch {
+      callbacks.onError?.('封面搜索返回了无法解析的数据')
+    }
+  }
+  socket.onclose = finish
+
+  return () => {
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.close(1000, 'Cover search cancelled')
+    }
+    finish()
+  }
+}
+
 const saveBook = (book: BaseBook) =>
   ajax.post<LeagdoApiResponse<string>>('saveBook', book)
 const deleteBook = (book: BaseBook) =>
@@ -173,12 +229,20 @@ const debug = (
  * 从阅读获取需要特定处理的书籍封面
  * @param {string} coverUrl
  */
-const getProxyCoverUrl = (coverUrl: string) => {
+const getProxyCoverUrl = (coverUrl: string, origin?: string) => {
   if (coverUrl.startsWith(legado_http_entry_point)) return coverUrl
-  return new URL(
-    'cover?path=' + encodeURIComponent(coverUrl),
-    legado_http_entry_point,
-  ).toString()
+  const parameters = new URLSearchParams({ path: coverUrl })
+  if (origin) parameters.set('origin', origin)
+  return new URL(`cover?${parameters}`, legado_http_entry_point).toString()
+}
+
+const getOriginalCoverUrl = (coverUrl: string, origin?: string) => {
+  const parameters = new URLSearchParams({
+    path: coverUrl,
+    original: 'true',
+  })
+  if (origin) parameters.set('origin', origin)
+  return new URL(`cover?${parameters}`, legado_http_entry_point).toString()
 }
 /**
  * 从阅读获取需要特定处理的图片
@@ -212,6 +276,7 @@ export default {
   getChapterList,
   getBookContent,
   search,
+  searchCover,
   saveBook,
   deleteBook,
 
@@ -222,5 +287,6 @@ export default {
   debug,
 
   getProxyCoverUrl,
+  getOriginalCoverUrl,
   getProxyImageUrl,
 }

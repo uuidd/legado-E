@@ -72,9 +72,19 @@
       <book-items
         :books="books"
         @bookClick="handleBookClick"
+        @download-cover="openCoverDownload"
+        @download-book="openBookDownload"
         :isSearch="isSearching"
       ></book-items>
     </div>
+    <book-cover-download-dialog
+      v-model="coverDialogVisible"
+      :book="selectedBook"
+    />
+    <book-download-dialog
+      v-model="bookDownloadDialogVisible"
+      :book="selectedBook"
+    />
   </div>
 </template>
 
@@ -94,9 +104,24 @@ import API, {
 import { validatorHttpUrl } from '@/utils/utils'
 import type { Book, SeachBook } from '@/book'
 import type { webReadConfig } from '@/web'
+import BookCoverDownloadDialog from '@/components/BookCoverDownloadDialog.vue'
+import BookDownloadDialog from '@/components/BookDownloadDialog.vue'
 
 const store = useBookStore()
 const isNight = computed(() => store.isNight)
+const selectedBook = shallowRef<Book | null>(null)
+const coverDialogVisible = ref(false)
+const bookDownloadDialogVisible = ref(false)
+
+const openCoverDownload = (book: Book) => {
+  selectedBook.value = book
+  coverDialogVisible.value = true
+}
+
+const openBookDownload = (book: Book) => {
+  selectedBook.value = book
+  bookDownloadDialogVisible.value = true
+}
 
 /** shortcuts of `store.setConfig` */
 const applyReadConfig = (config?: webReadConfig) => {
