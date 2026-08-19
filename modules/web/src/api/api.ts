@@ -79,20 +79,35 @@ const saveBookProgressWithBeacon = (bookProgress: BookProgress) => {
 
 const getBookShelf = () => ajax.get<LeagdoApiResponse<Book[]>>('getBookshelf')
 
-const getChapterList = (/** @type {string} */ bookUrl: string) =>
+const getChapterList = (
+  /** @type {string} */ bookUrl: string,
+  signal?: AbortSignal,
+) =>
   ajax.get<LeagdoApiResponse<BookChapter[]>>(
     'getChapterList?url=' + encodeURIComponent(bookUrl),
+    { signal },
+  )
+
+const refreshToc = (
+  /** @type {string} */ bookUrl: string,
+  signal?: AbortSignal,
+) =>
+  ajax.get<LeagdoApiResponse<BookChapter[]>>(
+    'refreshToc?url=' + encodeURIComponent(bookUrl),
+    { signal },
   )
 
 const getBookContent = (
   /** @type {string} */ bookUrl: string,
   /** @type {number} */ chapterIndex: number,
+  signal?: AbortSignal,
 ) =>
   ajax.get<LeagdoApiResponse<string>>(
     'getBookContent?url=' +
       encodeURIComponent(bookUrl) +
       '&index=' +
       chapterIndex,
+    { signal },
   )
 
 // webSocket
@@ -280,6 +295,7 @@ export default {
   saveBookProgressWithBeacon,
   getBookShelf,
   getChapterList,
+  refreshToc,
   getBookContent,
   search,
   searchCover,

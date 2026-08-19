@@ -27,7 +27,6 @@ import io.legado.app.utils.GSON
 import io.legado.app.utils.cnCompare
 import io.legado.app.utils.fromJsonObject
 import io.legado.app.utils.printOnDebug
-import io.legado.app.utils.stackTraceStr
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import splitties.init.appCtx
@@ -231,7 +230,10 @@ object BookController {
             }
             returnData.setData(content)
         } catch (e: Exception) {
-            returnData.setErrorMsg(e.stackTraceStr)
+            val message = e.localizedMessage?.takeIf { it.isNotBlank() }
+                ?: e.message?.takeIf { it.isNotBlank() }
+                ?: "获取正文失败"
+            returnData.setErrorMsg(message)
         }
         return returnData
     }
