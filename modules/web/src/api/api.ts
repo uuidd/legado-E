@@ -21,6 +21,7 @@ export type LeagdoApiResponse<T> = {
 export type CoverSearchCallbacks = {
   onResult: (data: SeachBook[]) => void
   onProgress?: (source: string) => void
+  onPaused?: () => void
   onError?: (message: string) => void
   onFinish: () => void
 }
@@ -126,6 +127,7 @@ const searchCover = (
   name: string,
   author: string,
   callbacks: CoverSearchCallbacks,
+  searchSourcesOnly = false,
 ) => {
   const socket = new WebSocket(
     new URL('searchCover', legado_webSocket_entry_point),
@@ -144,17 +146,21 @@ const searchCover = (
     } catch {}
     callbacks.onError?.('封面搜索连接失败')
   }
-  socket.onopen = () => socket.send(JSON.stringify({ name, author }))
+  socket.onopen = () =>
+    socket.send(JSON.stringify({ name, author, searchSourcesOnly }))
   socket.onmessage = event => {
     try {
       const data = JSON.parse(event.data) as
-        SeachBook[] | { error?: string; source?: string; type?: string }
+        | SeachBook[]
+        | { error?: string; source?: string; state?: string; type?: string }
       if (Array.isArray(data)) {
         callbacks.onResult(data)
       } else if (data.error) {
         callbacks.onError?.(data.error)
       } else if (data.type === 'progress' && data.source) {
         callbacks.onProgress?.(data.source)
+      } else if (data.type === 'coverSearch' && data.state === 'paused') {
+        callbacks.onPaused?.()
       }
       wsOnMessage?.call(socket, event)
     } catch {

@@ -121,8 +121,10 @@ Message = { key: [String] }
 
 ```
 URL = ws://127.0.0.1:1235/searchCover
-Message = { name: [String], author: [String] }
+Message = { name: [String], author: [String], searchSourcesOnly: [Boolean, optional] }
 ```
+
+首次请求遵循 App 的分阶段流程：缓存候选多于一个时直接返回；全局封面规则命中时返回候选并关闭连接。此时传入 `searchSourcesOnly: true` 可继续搜索启用书源。
 
 #### 插入书籍
 

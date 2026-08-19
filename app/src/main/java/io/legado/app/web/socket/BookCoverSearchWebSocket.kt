@@ -39,8 +39,8 @@ import kotlin.math.min
  *
  * The public `/searchBook` socket follows the user's current search scope and
  * merges equal books. Cover replacement needs a different contract: cached
- * exact matches and the global cover rule are returned first, then every
- * enabled source with a cover search rule is queried independently.
+ * exact matches are returned first. A global cover-rule match pauses the
+ * search, and the client explicitly resumes before enabled sources are tried.
  */
 class BookCoverSearchWebSocket(handshakeRequest: NanoHTTPD.IHTTPSession) :
     NanoWSD.WebSocket(handshakeRequest), CoroutineScope by MainScope() {
@@ -82,45 +82,50 @@ class BookCoverSearchWebSocket(handshakeRequest: NanoHTTPD.IHTTPSession) :
                 closeWithError(appCtx.getString(R.string.cannot_empty))
                 return@launch
             }
-            startSearch(name, author)
+            startSearch(name, author, query?.get("searchSourcesOnly") == "true")
         }
     }
 
-    private fun startSearch(name: String, author: String) {
+    private fun startSearch(name: String, author: String, searchSourcesOnly: Boolean) {
         stopSearch()
-        val threadCount = min(AppConfig.threadCount, AppConst.MAX_THREAD).coerceAtLeast(1)
+        val sourceConcurrency = AppConfig.threadCount.coerceAtLeast(1)
+        val threadCount = min(sourceConcurrency, AppConst.MAX_THREAD)
         searchPool = Executors.newFixedThreadPool(threadCount).asCoroutineDispatcher()
         searchJob = launch(searchPool!!) {
             runCatching {
-                send(GSON.toJson(mapOf("type" to "coverSearch", "state" to "started")))
-                // Match the native dialog by exposing reusable cached results.
-                appDb.searchBookDao.getEnableHasCover(name, author).forEach(::sendResult)
+                if (!searchSourcesOnly) {
+                    val cachedResults = appDb.searchBookDao.getEnableHasCover(name, author)
+                    // The native dialog keeps its cached candidates when more
+                    // than one was found, rather than launching another search.
+                    if (cachedResults.size > 1) {
+                        cachedResults.forEach(::sendResult)
+                        return@runCatching
+                    }
 
-                // The configured global cover rule is the native dialog's
-                // first search stage. Continue through sources afterwards so a
-                // desktop search produces the complete chooser in one pass.
-                runCatching { BookCover.searchCover(Book(name = name, author = author)) }
-                    .getOrNull()
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let {
+                    val coverUrl = runCatching {
+                        BookCover.searchCover(Book(name = name, author = author))
+                    }.getOrNull()
+                    if (!coverUrl.isNullOrBlank()) {
                         sendResult(
                             SearchBook(
                                 originName = "封面规则",
                                 name = name,
                                 author = author,
-                                coverUrl = it,
+                                coverUrl = coverUrl,
                                 originOrder = -1
                             )
                         )
+                        // Match the native "resume" state after the global rule.
+                        send(GSON.toJson(mapOf("type" to "coverSearch", "state" to "paused")))
+                        return@runCatching
                     }
+                }
 
                 flow {
                     appDb.bookSourceDao.allEnabledPart.forEach { sourcePart ->
-                        sourcePart.getBookSource()?.let { source ->
-                            if (!source.getSearchRule().coverUrl.isNullOrBlank()) emit(source)
-                        }
+                        sourcePart.getBookSource()?.let { source -> emit(source) }
                     }
-                }.mapParallelSafe(threadCount) { source ->
+                }.mapParallelSafe(sourceConcurrency) { source ->
                     val result = runCatching {
                         withTimeout(60000L) {
                             WebBook.searchBookAwait(

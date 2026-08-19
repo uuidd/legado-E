@@ -15,6 +15,9 @@
         <div class="search-status">
           <el-icon v-if="searching" class="is-loading"><Loading /></el-icon>
           <span v-if="searching">已检查 {{ processedSources }} 个书源</span>
+          <span v-else-if="canResumeSearch"
+            >已找到 {{ candidates.length }} 张封面</span
+          >
           <span v-else>找到 {{ candidates.length }} 张封面</span>
         </div>
       </div>
@@ -29,8 +32,8 @@
 
       <div v-if="candidates.length" class="cover-grid">
         <div
-          v-for="candidate in candidates"
-          :key="candidate.coverUrl"
+          v-for="(candidate, index) in candidates"
+          :key="candidate.key"
           class="cover-result"
         >
           <el-image
@@ -38,6 +41,12 @@
             :src="thumbnailUrl(candidate)"
             fit="cover"
             loading="lazy"
+            role="button"
+            tabindex="0"
+            :aria-label="`查看 ${candidate.originName} 的封面`"
+            @click="openPreview(index)"
+            @keydown.enter.prevent="openPreview(index)"
+            @keydown.space.prevent="openPreview(index)"
           >
             <template #error>
               <div class="cover-error">
@@ -52,8 +61,8 @@
             <el-button
               text
               :icon="Download"
-              :loading="downloadingUrl === candidate.coverUrl"
-              :disabled="Boolean(downloadingUrl)"
+              :loading="downloadingKey === candidate.key"
+              :disabled="Boolean(downloadingKey)"
               @click="downloadCandidate(candidate)"
             >
               下载
@@ -77,9 +86,23 @@
       </div>
     </div>
 
+    <el-image-viewer
+      v-if="previewIndex !== null"
+      :url-list="previewUrls"
+      :initial-index="previewIndex"
+      :hide-on-click-modal="false"
+      :teleported="true"
+      @close="previewIndex = null"
+      @switch="previewIndex = $event"
+    />
+
     <template #footer>
-      <el-button :icon="Refresh" :loading="searching" @click="startSearch">
-        重新搜索
+      <el-button
+        :icon="Refresh"
+        :loading="searching"
+        @click="startOrResumeSearch"
+      >
+        {{ canResumeSearch ? '继续搜索书源' : '重新搜索' }}
       </el-button>
       <el-button type="primary" @click="visible = false">关闭</el-button>
     </template>
@@ -93,9 +116,12 @@ import { downloadImage, safeFileName } from '@/utils/download'
 import { Download, Loading, Picture, Refresh } from '@element-plus/icons-vue'
 
 type CoverCandidate = {
+  key: string
+  bookUrl: string
   coverUrl: string
   origin?: string
   originName: string
+  originOrder: number
 }
 
 const props = defineProps<{
@@ -112,66 +138,94 @@ const visible = computed({
   set: value => emit('update:modelValue', value),
 })
 const candidates = ref<CoverCandidate[]>([])
+const previewIndex = ref<number | null>(null)
 const searching = ref(false)
+const canResumeSearch = ref(false)
 const processedSources = ref(0)
 const errorMessage = ref('')
-const downloadingUrl = ref('')
+const downloadingKey = ref('')
 let stopSearch: (() => void) | undefined
 let searchId = 0
 
 const addCandidates = (items: SeachBook[]) => {
-  const knownUrls = new Set(candidates.value.map(item => item.coverUrl))
+  const knownBookUrls = new Set(candidates.value.map(item => item.bookUrl))
   items.forEach(item => {
-    if (!item.coverUrl || knownUrls.has(item.coverUrl)) return
-    knownUrls.add(item.coverUrl)
+    if (!item.coverUrl || knownBookUrls.has(item.bookUrl)) return
+    knownBookUrls.add(item.bookUrl)
     candidates.value.push({
+      key: item.bookUrl || `cover-rule:${item.coverUrl}`,
+      bookUrl: item.bookUrl,
       coverUrl: item.coverUrl,
       origin: item.origin,
       originName: item.originName || '未知书源',
+      originOrder: item.originOrder,
     })
   })
+  candidates.value.sort((left, right) => left.originOrder - right.originOrder)
 }
 
-const startSearch = () => {
+const startSearch = (searchSourcesOnly = false) => {
   const book = props.book
   if (!book) return
   stopSearch?.()
   const currentSearchId = ++searchId
-  candidates.value = []
-  const currentCover = book.customCoverUrl || book.coverUrl
-  if (currentCover) {
-    candidates.value.push({
-      coverUrl: currentCover,
-      origin: book.origin,
-      originName: '当前封面',
-    })
+  if (!searchSourcesOnly) {
+    candidates.value = []
+    const currentCover = book.customCoverUrl || book.coverUrl
+    if (currentCover) {
+      candidates.value.push({
+        key: 'current-cover',
+        bookUrl: 'current-cover',
+        coverUrl: currentCover,
+        origin: book.origin,
+        originName: '当前封面',
+        originOrder: Number.MIN_SAFE_INTEGER,
+      })
+    }
   }
   processedSources.value = 0
   errorMessage.value = ''
+  canResumeSearch.value = false
   searching.value = true
-  stopSearch = API.searchCover(book.name, book.author, {
-    onResult: items => {
-      if (currentSearchId === searchId) addCandidates(items)
+  stopSearch = API.searchCover(
+    book.name,
+    book.author,
+    {
+      onResult: items => {
+        if (currentSearchId === searchId) addCandidates(items)
+      },
+      onProgress: () => {
+        if (currentSearchId === searchId) processedSources.value++
+      },
+      onPaused: () => {
+        if (currentSearchId === searchId) canResumeSearch.value = true
+      },
+      onError: message => {
+        if (currentSearchId === searchId) errorMessage.value = message
+      },
+      onFinish: () => {
+        if (currentSearchId === searchId) searching.value = false
+      },
     },
-    onProgress: () => {
-      if (currentSearchId === searchId) processedSources.value++
-    },
-    onError: message => {
-      if (currentSearchId === searchId) errorMessage.value = message
-    },
-    onFinish: () => {
-      if (currentSearchId === searchId) searching.value = false
-    },
-  })
+    searchSourcesOnly,
+  )
 }
+
+const startOrResumeSearch = () => startSearch(canResumeSearch.value)
 
 const thumbnailUrl = (candidate: CoverCandidate) =>
   API.getProxyCoverUrl(candidate.coverUrl, candidate.origin)
 
+const previewUrls = computed(() => candidates.value.map(thumbnailUrl))
+
+const openPreview = (index: number) => {
+  previewIndex.value = index
+}
+
 const downloadCandidate = async (candidate: CoverCandidate) => {
   const book = props.book
   if (!book) return
-  downloadingUrl.value = candidate.coverUrl
+  downloadingKey.value = candidate.key
   try {
     const fileName = safeFileName(
       `${book.name}-${book.author || '未知作者'}-${candidate.originName}.png`,
@@ -185,7 +239,7 @@ const downloadCandidate = async (candidate: CoverCandidate) => {
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '封面下载失败')
   } finally {
-    downloadingUrl.value = ''
+    downloadingKey.value = ''
   }
 }
 
@@ -195,10 +249,12 @@ watch(
     if (open) {
       startSearch()
     } else {
+      previewIndex.value = null
       searchId++
       stopSearch?.()
       stopSearch = undefined
       searching.value = false
+      canResumeSearch.value = false
     }
   },
 )
@@ -261,6 +317,7 @@ onBeforeUnmount(() => stopSearch?.())
 .cover-preview {
   display: block;
   background: var(--el-fill-color-light);
+  cursor: zoom-in;
 }
 
 .cover-error {
